@@ -1,0 +1,234 @@
+schema_version: 2
+diagram_id: realtime-gateway-service
+mode: service
+orientation: LR
+scope: realtime_gateway service view — stateless WebSocket fan-out gateway, its callers,
+  Kafka consumers, Clerk JWKS dependency and community_service authorization calls.
+sources:
+- path: docs/architecture.md
+  sha256: 4e6700949bab776636f9b260ef34cbe69d9e228f91e793890b2769b8aadd6b21
+- path: docs/decisions/ADR-001-pod-unique-consumer-groups.md
+  sha256: 822c688f60cb2a5a457fa70d79ad780831fde547c561637050f11bbc8834f291
+- path: docs/decisions/ADR-002-jose-jwks-auth.md
+  sha256: a93b536ec113bbf2476a11054ec758852299bd71011324d1726003853513cda6
+- path: docs/openapi_spec.yaml
+  sha256: 5a22d53c6e1fa683a98e35a68c85953c4a16390e89b15faafba2cd68384f6662
+- path: docs/user_stories.md
+  sha256: 73f130e8bf39aba1418388c6411d2c354835205206dff3625262622b7f1f476a
+entities:
+- id: member
+  label: Member WebSocket client
+  kind: annotation
+  role: inbound
+  row: 330
+  evidence:
+  - path: docs/architecture.md
+    quote: Client opens `GET /v1/gateway`; the pod upgrades the connection (unless
+      draining → reject).
+- id: probes
+  label: Kubernetes health probes
+  kind: annotation
+  role: inbound
+  row: 400
+  evidence:
+  - path: docs/openapi_spec.yaml
+    quote: Kubernetes liveness and readiness probes
+- id: svc
+  name: realtime_gateway
+  label: realtime_gateway
+  kind: service
+  technology: kubernetes-pod
+  role: service
+  row: 260
+  evidence:
+  - path: docs/architecture.md
+    quote: '`realtime_gateway` owns **no database tables and no object storage**.'
+  - path: docs/architecture.md
+    quote: Terminates the `GET /v1/gateway` WebSocket upgrade and owns the client
+      frame protocol.
+- id: kafka
+  name: Kafka
+  label: Kafka brokers
+  kind: broker
+  technology: kafka
+  role: outbound
+  row: 10
+  evidence:
+  - path: docs/architecture.md
+    quote: Every pod sees **every** event (Kafka group semantics become broadcast).
+- id: clerk
+  label: Clerk identity provider
+  kind: annotation
+  external: true
+  external_role: dependency
+  role: outbound
+  row: 380
+  evidence:
+  - path: docs/architecture.md
+    quote: The gateway never calls the identity provider in the request path.
+- id: community
+  label: community_service
+  kind: annotation
+  role: sync-only
+  row: 560
+  evidence:
+  - path: docs/architecture.md
+    quote: 'Endpoint: `GET /internal/v1/communities/{community_id}/members/{user_id}/access`'
+relationships:
+- id: r-member
+  source: member
+  target: svc
+  type: request
+  interaction:
+    channel: direct
+    purpose: client WebSocket session
+    protocol: WebSocket
+    exchange_id: ws-session
+  evidence:
+  - path: docs/openapi_spec.yaml
+    quote: Upgrades the HTTP request to a WebSocket connection.
+  - path: docs/architecture.md
+    quote: Client opens `GET /v1/gateway`; the pod upgrades the connection (unless
+      draining → reject).
+- id: r-probes
+  source: probes
+  target: svc
+  type: request
+  interaction:
+    channel: direct
+    purpose: liveness and readiness probes
+    exchange_id: health-probes
+  evidence:
+  - path: docs/openapi_spec.yaml
+    quote: Kubernetes liveness and readiness probes
+- id: r-clerk
+  source: svc
+  target: clerk
+  type: request
+  interaction:
+    channel: direct
+    purpose: JWKS key fetch
+  evidence:
+  - path: docs/decisions/ADR-002-jose-jwks-auth.md
+    quote: Verification stays fully offline after the initial JWKS fetch
+- id: r-community
+  source: svc
+  target: community
+  type: request
+  interaction:
+    channel: direct
+    purpose: member access authorization
+    exchange_id: member-access
+  evidence:
+  - path: docs/architecture.md
+    quote: 'Endpoint: `GET /internal/v1/communities/{community_id}/members/{user_id}/access`'
+  - path: docs/architecture.md
+    quote: 'Used on: subscribe, and on access-changing `community_events` for locally
+      subscribed users.'
+- id: r-cons-chat
+  source: kafka
+  target: svc
+  type: event
+  direction: forward
+  interaction:
+    channel: messaging
+    purpose: chat message delivery
+    protocol: Kafka
+  messaging:
+    role: consumer
+    topic: chat_message_events
+  evidence:
+  - path: docs/architecture.md
+    quote: Every pod sees **every** event (Kafka group semantics become broadcast).
+  - path: docs/architecture.md
+    quote: '`chat_message_events` (`channel_id`) | `message_created`, `message_edited`,
+      `message_deleted`'
+- id: r-cons-community
+  source: kafka
+  target: svc
+  type: event
+  direction: forward
+  interaction:
+    channel: messaging
+    purpose: community and moderation delivery
+    protocol: Kafka
+  messaging:
+    role: consumer
+    topic: community_events
+  evidence:
+  - path: docs/architecture.md
+    quote: Every pod sees **every** event (Kafka group semantics become broadcast).
+  - path: docs/architecture.md
+    quote: '`community_events` (`community_id`) | `channel_created/updated/deleted`,
+      `member_joined/left`, `member_roles_changed`, `roles_changed`, `permission_overwrites_changed`'
+- id: r-cons-friends
+  source: kafka
+  target: svc
+  type: event
+  direction: forward
+  interaction:
+    channel: messaging
+    purpose: friend event delivery
+    protocol: Kafka
+  messaging:
+    role: consumer
+    topic: identity_friend_events
+  evidence:
+  - path: docs/architecture.md
+    quote: Every pod sees **every** event (Kafka group semantics become broadcast).
+  - path: docs/architecture.md
+    quote: '`identity_friend_events` (`recipient_user_id`) | `friend_request_sent`'
+view:
+  entities:
+  - member
+  - probes
+  - svc
+  - kafka
+  - clerk
+  - community
+  groups: []
+  edges:
+  - id: e-member
+    source: member
+    target: svc
+    relationships:
+    - r-member
+    label: WebSocket
+    flow: forward
+  - id: e-probes
+    source: probes
+    target: svc
+    relationships:
+    - r-probes
+    label: health probes
+    flow: forward
+  - id: e-clerk
+    source: svc
+    target: clerk
+    relationships:
+    - r-clerk
+    label: JWKS fetch
+    flow: forward
+  - id: e-community
+    source: svc
+    target: community
+    relationships:
+    - r-community
+    label: member access
+    flow: forward
+  - id: e-cons
+    source: kafka
+    target: svc
+    relationships:
+    - r-cons-chat
+    - r-cons-community
+    - r-cons-friends
+    label: 'Consumers
+
+      realtime_gateway:chat_message_events
+
+      realtime_gateway:community_events
+
+      realtime_gateway:identity_friend_events'
+    flow: feedback
+  omitted: []
