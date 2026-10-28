@@ -1,0 +1,481 @@
+openapi: "3.0.3"
+info:
+  title: Realtime Gateway API
+  version: "1.0.0"
+  description: >
+    WebSocket gateway for the real-time communication platform. Terminates client
+    WebSocket connections, verifies Clerk session JWTs offline, authorizes community
+    subscriptions via the community service, and fans out Kafka events
+    (chat messages, community changes, friend events, moderation notices) to
+    authorized subscribed sessions. Stateless; no database.
+servers:
+  - url: /
+tags:
+  - name: gateway
+    description: Real-time WebSocket delivery
+  - name: health
+    description: Kubernetes liveness and readiness probes
+
+paths:
+  /v1/gateway:
+    get:
+      operationId: openGatewaySocket
+      summary: Open the real-time WebSocket connection
+      description: >
+        Upgrades the HTTP request to a WebSocket connection. Once open, the client and
+        server exchange JSON frames (see Frame schemas). Authentication is performed by
+        the `identify` frame carrying a Clerk session JWT — not by HTTP headers.
+        A pod that is draining (shutdown in progress) rejects the upgrade.
+      tags: [gateway]
+      parameters:
+        - name: Connection
+          in: header
+          required: true
+          description: Must be `Upgrade` per the WebSocket handshake.
+          schema:
+            type: string
+            enum: [Upgrade]
+        - name: Upgrade
+          in: header
+          required: true
+          description: Must be `websocket` per the WebSocket handshake.
+          schema:
+            type: string
+            enum: [websocket]
+        - name: Sec-WebSocket-Key
+          in: header
+          required: true
+          description: Standard WebSocket handshake key.
+          schema:
+            type: string
+        - name: Sec-WebSocket-Version
+          in: header
+          required: true
+          description: Supported WebSocket protocol version.
+          schema:
+            type: string
+            enum: ["13"]
+      responses:
+        "101":
+          description: >
+            Switching Protocols — the connection is now a WebSocket. All further
+            communication uses the JSON frames defined in `components/schemas`
+            (client-to-server frames end in `Frame`; server-to-client frames in
+            `ServerFrame`). Events delivered via `EventFrame` carry one of the
+            event data payloads listed under `components/schemas`.
+        "400":
+          description: Malformed WebSocket handshake
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "426":
+          description: Upgrade Required — the request was not a valid WebSocket upgrade
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Pod is draining or not ready to accept sessions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected server error during upgrade
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /healthz:
+    get:
+      operationId: getLiveness
+      summary: Liveness probe
+      description: >
+        Lightweight check that the process event loop is responsive. MUST NOT fail on
+        transient downstream dependency hiccups (Kafka, community service).
+      tags: [health]
+      responses:
+        "200":
+          description: Process alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /readyz:
+    get:
+      operationId: getReadiness
+      summary: Readiness probe
+      description: >
+        Returns 200 only when the pod's Kafka consumers have partition assignments and
+        the service is not draining. Returns 503 during shutdown so no new sessions are
+        routed to the pod.
+      tags: [health]
+      responses:
+        "200":
+          description: Pod ready to accept sessions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        "503":
+          description: Not ready (consumers unassigned or draining)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable machine-readable error code.
+              example: internal_error
+            message:
+              type: string
+              description: Human-readable, non-punitive message.
+            details:
+              description: Optional structured context (never internal stack traces).
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        checked_at:
+          type: string
+          format: date-time
+
+    # ---------- Shared frame envelope ----------
+    FrameBase:
+      type: object
+      required: [type]
+      description: Base of every client-to-server frame.
+      properties:
+        type:
+          type: string
+          description: Frame discriminator.
+    ServerFrameBase:
+      type: object
+      required: [type]
+      description: Base of every server-to-client frame.
+      properties:
+        type:
+          type: string
+          description: Frame discriminator.
+
+    # ---------- Client -> Server frames ----------
+    IdentifyFrame:
+      allOf:
+        - $ref: '#/components/schemas/FrameBase'
+        - type: object
+          required: [type, token]
+          properties:
+            type:
+              type: string
+              enum: [identify]
+            token:
+              type: string
+              description: Clerk session JWT (short-lived). Verified offline via JWKS.
+    HeartbeatFrame:
+      allOf:
+        - $ref: '#/components/schemas/FrameBase'
+        - type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [heartbeat]
+    SubscribeCommunityFrame:
+      allOf:
+        - $ref: '#/components/schemas/FrameBase'
+        - type: object
+          required: [type, community_id]
+          properties:
+            type:
+              type: string
+              enum: [subscribe_community]
+            community_id:
+              type: string
+              description: Platform community id to subscribe to.
+    UnsubscribeCommunityFrame:
+      allOf:
+        - $ref: '#/components/schemas/FrameBase'
+        - type: object
+          required: [type, community_id]
+          properties:
+            type:
+              type: string
+              enum: [unsubscribe_community]
+            community_id:
+              type: string
+    RefreshTokenFrame:
+      allOf:
+        - $ref: '#/components/schemas/FrameBase'
+        - type: object
+          required: [type, token]
+          properties:
+            type:
+              type: string
+              enum: [refresh_token]
+            token:
+              type: string
+              description: Fresh Clerk session JWT replacing the previous one.
+
+    ClientFrame:
+      description: Any frame a client may send.
+      oneOf:
+        - $ref: '#/components/schemas/IdentifyFrame'
+        - $ref: '#/components/schemas/HeartbeatFrame'
+        - $ref: '#/components/schemas/SubscribeCommunityFrame'
+        - $ref: '#/components/schemas/UnsubscribeCommunityFrame'
+        - $ref: '#/components/schemas/RefreshTokenFrame'
+
+    # ---------- Server -> Client frames ----------
+    ReadyFrame:
+      allOf:
+        - $ref: '#/components/schemas/ServerFrameBase'
+        - type: object
+          required: [type, user_id, username]
+          properties:
+            type:
+              type: string
+              enum: [ready]
+            user_id:
+              type: string
+              description: Platform user id (from the verified `sub` claim).
+            username:
+              type: string
+              description: Username claim carried by the session token.
+    HeartbeatAckFrame:
+      allOf:
+        - $ref: '#/components/schemas/ServerFrameBase'
+        - type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [heartbeat_ack]
+    ReconnectFrame:
+      allOf:
+        - $ref: '#/components/schemas/ServerFrameBase'
+        - type: object
+          required: [type, reason]
+          properties:
+            type:
+              type: string
+              enum: [reconnect]
+            reason:
+              type: string
+              enum: [shutdown, token_expiry, error]
+              description: Why the client should reconnect.
+    ErrorFrame:
+      allOf:
+        - $ref: '#/components/schemas/ServerFrameBase'
+        - type: object
+          required: [type, code]
+          properties:
+            type:
+              type: string
+              enum: [error]
+            code:
+              type: string
+              enum:
+                - invalid_token
+                - token_expired
+                - not_identified
+                - already_identified
+                - not_authorized
+                - not_subscribed
+                - invalid_frame
+                - internal_error
+            message:
+              type: string
+              description: Human-readable, actionable message.
+
+    # ---------- Event frames ----------
+    EventFrame:
+      allOf:
+        - $ref: '#/components/schemas/ServerFrameBase'
+        - type: object
+          required: [type, event_type, data]
+          properties:
+            type:
+              type: string
+              enum: [event]
+            event_type:
+              type: string
+              description: Discriminator of the delivered platform event.
+            data:
+              description: >
+                Payload for the event. One of the `*EventData` schemas; which one is
+                determined by `event_type`.
+    SubscribedEventData:
+      type: object
+      required: [community_id, visible_channel_ids]
+      properties:
+        community_id:
+          type: string
+        visible_channel_ids:
+          type: array
+          description: Channel ids the user may currently see in this community.
+          items:
+            type: string
+    MessageCreatedEventData:
+      type: object
+      required: [message_id, channel_id, community_id, author_user_id, author_username, content, created_at]
+      properties:
+        message_id:
+          type: string
+        channel_id:
+          type: string
+        community_id:
+          type: string
+        author_user_id:
+          type: string
+        author_username:
+          type: string
+        content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    MessageEditedEventData:
+      type: object
+      required: [message_id, channel_id, community_id, content, edited_at]
+      properties:
+        message_id:
+          type: string
+        channel_id:
+          type: string
+        community_id:
+          type: string
+        content:
+          type: string
+        edited_at:
+          type: string
+          format: date-time
+    MessageDeletedEventData:
+      type: object
+      required: [message_id, channel_id, community_id]
+      properties:
+        message_id:
+          type: string
+        channel_id:
+          type: string
+        community_id:
+          type: string
+    ChannelChangedEventData:
+      type: object
+      required: [community_id, channel_id]
+      properties:
+        community_id:
+          type: string
+        channel_id:
+          type: string
+        name:
+          type: string
+          description: Present on channel_created / channel_updated.
+        type:
+          type: string
+          enum: [text, voice]
+          description: Present on channel_created / channel_updated.
+        position:
+          type: integer
+          description: Present on channel_created / channel_updated.
+    CommunityEventData:
+      type: object
+      required: [community_id]
+      properties:
+        community_id:
+          type: string
+        name:
+          type: string
+          description: Present on community_updated.
+        channel_ids:
+          type: array
+          items:
+            type: string
+          description: Present on community_deleted.
+    MemberChangedEventData:
+      type: object
+      required: [community_id, user_id]
+      properties:
+        community_id:
+          type: string
+        user_id:
+          type: string
+        role_ids:
+          type: array
+          items:
+            type: string
+          description: Present on member_roles_changed.
+    ModerationNoticeEventData:
+      type: object
+      required: [community_id, user_id, action]
+      properties:
+        community_id:
+          type: string
+        user_id:
+          type: string
+          description: Affected member's user id.
+        action:
+          type: string
+          enum: [member_timed_out, member_timeout_cleared, member_kicked, member_banned, member_unbanned]
+        timed_out_until:
+          type: string
+          format: date-time
+          description: Present on member_timed_out.
+        ban_expires_at:
+          type: string
+          format: date-time
+          description: Present on member_banned when the ban is temporary.
+        member_message:
+          type: string
+          description: Member-facing, non-punitive explanation; present when the moderator supplied one.
+    FriendEventData:
+      type: object
+      required: [request_id, sender_user_id, recipient_user_id]
+      properties:
+        request_id:
+          type: string
+        sender_user_id:
+          type: string
+        recipient_user_id:
+          type: string
+        sender_username:
+          type: string
+          description: Present on friend_request_sent.
+        recipient_username:
+          type: string
+          description: Present on friend_request_sent.
+
+    ServerFrame:
+      description: Any frame the server may send.
+      oneOf:
+        - $ref: '#/components/schemas/ReadyFrame'
+        - $ref: '#/components/schemas/HeartbeatAckFrame'
+        - $ref: '#/components/schemas/EventFrame'
+        - $ref: '#/components/schemas/ErrorFrame'
+        - $ref: '#/components/schemas/ReconnectFrame'
+
+  responses:
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
