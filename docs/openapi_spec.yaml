@@ -14,7 +14,7 @@ tags:
   - name: gateway
     description: Real-time WebSocket delivery
   - name: health
-    description: Kubernetes liveness and readiness probes
+    description: Liveness and readiness probes
 
 paths:
   /v1/gateway:

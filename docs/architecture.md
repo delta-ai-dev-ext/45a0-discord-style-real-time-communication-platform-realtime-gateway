@@ -145,7 +145,7 @@ no-op elsewhere) — this is expected in the broadcast model.
   **fails closed** — if authorization cannot be established, the gateway never grants
   visibility or delivery. Repeated failure raises the access-fetch error rate metric and
   surfaces as `error {code: internal_error}` to the client.
-- The internal bearer token is a shared secret configured per caller via Kubernetes secrets.
+- The internal bearer token is a shared secret configured per caller via your platform secret store.
 - W3C `traceparent` is propagated on every call.
 
 ---

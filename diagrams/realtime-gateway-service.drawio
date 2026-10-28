@@ -22,7 +22,7 @@
 <mxCell id="probes" value="" vertex="1" parent="1" style="rounded=1;html=0;fillColor=#FFFFFF;strokeColor=#0B1F33;fontColor=#0B1F33;" deltaKind="annotation" deltaRole="inbound">
 <mxGeometry x="40" y="372" width="240" height="56" as="geometry" />
 </mxCell>
-<mxCell id="probes-t" value="Kubernetes health probes" vertex="1" parent="1" style="text;html=0;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontColor=#0B1F33;fontSize=12;" deltaKind="annotation">
+<mxCell id="probes-t" value="Health probes" vertex="1" parent="1" style="text;html=0;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontColor=#0B1F33;fontSize=12;" deltaKind="annotation">
 <mxGeometry x="40" y="388" width="240" height="24" as="geometry" />
 </mxCell>
 <mxCell id="svc" value="" vertex="1" parent="1" style="rounded=1;html=0;fillColor=#DDF1EF;strokeColor=#0E7C78;strokeWidth=1.5;fontColor=#0B1F33;" deltaKind="annotation" deltaRole="service">

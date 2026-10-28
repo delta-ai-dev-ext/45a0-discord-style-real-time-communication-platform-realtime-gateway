@@ -7,7 +7,7 @@ Accepted
 2026-02-05
 
 ## Context
-The gateway is horizontally scaled across stateless pods, and each connected client must
+The gateway is horizontally scaled across stateless replicas, and each connected client must
 receive platform events (chat messages, community changes, friend events) regardless of
 which pod it happens to be connected to. Kafka's consumer-group semantics deliver each
 partition to exactly one member of a group — which is the opposite of what a gateway

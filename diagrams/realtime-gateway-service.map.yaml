@@ -26,18 +26,18 @@ entities:
     quote: Client opens `GET /v1/gateway`; the pod upgrades the connection (unless
       draining → reject).
 - id: probes
-  label: Kubernetes health probes
+  label: Health probes
   kind: annotation
   role: inbound
   row: 400
   evidence:
   - path: docs/openapi_spec.yaml
-    quote: Kubernetes liveness and readiness probes
+    quote: Liveness and readiness probes
 - id: svc
   name: realtime_gateway
   label: realtime_gateway
   kind: service
-  technology: kubernetes-pod
+  technology: container
   role: service
   row: 260
   evidence:
@@ -100,7 +100,7 @@ relationships:
     exchange_id: health-probes
   evidence:
   - path: docs/openapi_spec.yaml
-    quote: Kubernetes liveness and readiness probes
+    quote: Liveness and readiness probes
 - id: r-clerk
   source: svc
   target: clerk

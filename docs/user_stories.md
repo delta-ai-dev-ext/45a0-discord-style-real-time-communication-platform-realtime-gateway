@@ -190,7 +190,7 @@ only as the source of events the gateway relays), **operator** (platform/infrast
 - Given a draining pod, when `GET /readyz` is called, then it returns `503` immediately so no new sessions are routed to it.
 
 ### Out of Scope
-- Kubernetes probe scheduling and thresholds.
+- Orchestrator probe scheduling and thresholds.
 
 ---
 

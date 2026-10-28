@@ -61,7 +61,7 @@ lint:
 
 ---
 
-## Kubernetes Lifecycle & Probes
+## Container Lifecycle & Probes
 
 - **Statelessness rules:** no on-disk state, no local caches that outlive a request's
   usefulness beyond the pod lifetime. Session registry, subscriptions, visible-channel
@@ -71,7 +71,7 @@ lint:
   Kafka or `community_service` — a transient downstream blip must never cause a restart.
 - **`GET /readyz` (readiness):** `200` only when all three Kafka consumers have partition
   assignments and the pod is not draining; `503` otherwise. Fails immediately when
-  shutdown starts so Kubernetes stops routing new sessions.
+  shutdown starts so your orchestrator stops routing new sessions.
 - **SIGTERM / SIGINT graceful shutdown (ordered, bounded):**
   1. Mark readiness failing; reject new WebSocket upgrades.
   2. Send a `reconnect` frame to every connected session, then begin closing sockets.
@@ -79,7 +79,7 @@ lint:
   4. Flush bounded outbound queues within `SHUTDOWN_TIMEOUT_MS` (default 20 s), then
      force-close remaining connections.
   5. Close Kafka consumer connections cleanly; exit with code `0`.
-- Kubernetes should pair this with a short `terminationGracePeriodSeconds` that exceeds
+- Pair this with a termination grace period that exceeds
   `SHUTDOWN_TIMEOUT_MS`.
 
 ---
@@ -151,7 +151,7 @@ production; `.env` allowed locally only and must be gitignored.
 | `KAFKA_BROKERS` | **yes** | Comma-separated Kafka bootstrap brokers |
 | `KAFKA_CLIENT_ID` | no (default `realtime_gateway`) | Kafka `clientId` |
 | `COMMUNITY_SERVICE_URL` | **yes** | Base URL of `community_service` (cluster-internal) |
-| `INTERNAL_SERVICE_TOKEN` | **yes** | Service-to-service bearer token for `community_service` internal endpoints (from a K8s secret) |
+| `INTERNAL_SERVICE_TOKEN` | **yes** | Service-to-service bearer token for `community_service` internal endpoints (from your platform secret store) |
 | `CLERK_JWKS_URL` | **yes** | Clerk JWKS endpoint for offline session-JWT verification |
 | `CLERK_ISSUER` | **yes** | Expected `iss` claim of Clerk session tokens |
 | `CLERK_AUDIENCE` | no | Expected `aud` claim when configured |
@@ -162,7 +162,7 @@ production; `.env` allowed locally only and must be gitignored.
 | `SHUTDOWN_TIMEOUT_MS` | no (default `20000`) | Bounded drain window on SIGTERM/SIGINT |
 | `LOG_LEVEL` | no (default `info`) | `debug\|info\|warn\|error` |
 
-Secrets (`INTERNAL_SERVICE_TOKEN`) come from Kubernetes secrets mounted as env vars —
+Secrets (`INTERNAL_SERVICE_TOKEN`) come from environment variables injected from your platform secret store —
 never committed, never logged.
 
 ---
